@@ -15,6 +15,9 @@ echo "Creating bundle structure..."
 mkdir -p "${MACOS_DIR}"
 mkdir -p "${RESOURCES_DIR}"
 
+echo "Copying icon..."
+cp AppIcon.icns "${RESOURCES_DIR}/"
+
 echo "Writing Info.plist..."
 cat <<EOF > "${CONTENTS_DIR}/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
