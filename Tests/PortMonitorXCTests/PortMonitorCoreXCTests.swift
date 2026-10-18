@@ -93,8 +93,8 @@ final class TrafficTests: XCTestCase {
             interval: 2
         )
 
-        XCTAssertEqual(rates[7]?.bytesInPerSecond, 1_000.0)
-        XCTAssertEqual(rates[7]?.bytesOutPerSecond, 500.0)
+        XCTAssertEqual(rates[7]?.bytesInPerSecond ?? -1, 1_000.0)
+        XCTAssertEqual(rates[7]?.bytesOutPerSecond ?? -1, 500.0)
     }
 
     func testCounterResetIsClamped() {
@@ -113,15 +113,15 @@ final class TrafficTests: XCTestCase {
     }
 }
 
-final class NettopParserTests: XCTestCase {
-    private let fixture = """
-    time,,interface,state,bytes_in,bytes_out,rx_dupe
-    05:57:57.200096,launchd.1,,,0,0,0
-    05:57:57.200100,com.apple.WebKit.4321,,,1200,3400,0
-    """
+private let nettopFixtureCSV = """
+time,,interface,state,bytes_in,bytes_out,rx_dupe
+05:57:57.200096,launchd.1,,,0,0,0
+05:57:57.200100,com.apple.WebKit.4321,,,1200,3400,0
+"""
 
+final class NettopParserTests: XCTestCase {
     func testParsesRowsAndPreservesDottedNames() {
-        let traffic = NettopParser.parse(fixture)
+        let traffic = NettopParser.parse(nettopFixtureCSV)
 
         XCTAssertEqual(traffic.count, 2)
         XCTAssertEqual(traffic[0].pid, 1)
@@ -130,7 +130,7 @@ final class NettopParserTests: XCTestCase {
     }
 
     func testStubbedProvider() throws {
-        let provider = NettopTrafficProvider { _ in fixture }
+        let provider = NettopTrafficProvider { _ in nettopFixtureCSV }
         XCTAssertEqual(try provider.sample().count, 2)
     }
 }
