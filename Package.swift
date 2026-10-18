@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "PortMonitorTest",
+    name: "PortMonitor",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "PortMonitorTest", targets: ["PortMonitorTest"]),
+        .executable(name: "PortMonitor", targets: ["PortMonitor"]),
         .executable(name: "PortMonitorCoreTests", targets: ["PortMonitorCoreTests"]),
         .library(name: "PortMonitorCore", targets: ["PortMonitorCore"])
     ],
@@ -23,7 +23,7 @@ let package = Package(
 
         // SwiftUI application shell.
         .executableTarget(
-            name: "PortMonitorTest",
+            name: "PortMonitor",
             dependencies: ["PortMonitorCore"]
         ),
 
