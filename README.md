@@ -146,8 +146,14 @@ Tools-only toolchain: `make test` (or `swift run PortMonitorCoreTests`) exits
 non-zero on failure, which is what CI relies on.
 
 ```
-39/39 passed
+39/39 passed                      # on a developer Mac
+38/39 passed, 1 skipped           # on a GitHub macOS runner
 ```
+
+Tests that compare the *real* backends against each other skip themselves when
+the host has nothing to compare — e.g. `native and lsof agree on TCP listeners`
+needs TCP listeners visible to the unprivileged user, which a CI runner does not
+have. A skip is reported on its own line and never counts as a failure.
 
 Covered:
 
@@ -175,7 +181,8 @@ make test-xctest      # PORTMONITOR_ENABLE_XCTEST=1 swift test
 ```
 
 CI runs the dependency-free runner, packages the bundle, and then runs the
-XCTest mirror on `macos-latest` (which has Xcode).
+XCTest mirror (15 tests) on `macos-latest`, which has Xcode. The mirror uses
+`XCTSkipIf` for the same host-dependent comparisons.
 
 ## Notes and limitations
 
