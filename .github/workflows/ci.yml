@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, dev, swiftpm]
   pull_request:
 
 jobs:
@@ -17,5 +17,13 @@ jobs:
       - name: Build
         run: swift build
 
-      - name: Test
+      - name: Test (dependency-free runner)
         run: swift run PortMonitorCoreTests
+
+      - name: Package the app bundle
+        run: make bundle
+
+      # The XCTest mirror needs a full Xcode install, which the macos-latest
+      # runner has. Locally it stays dormant (see Package.swift).
+      - name: Test (XCTest mirror)
+        run: PORTMONITOR_ENABLE_XCTEST=1 swift test
