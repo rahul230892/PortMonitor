@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import PortMonitorCore
 
 @MainActor
@@ -16,7 +17,7 @@ struct ContentView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 720, minHeight: 440)
+        .frame(minWidth: 760, minHeight: 460)
         .confirmationDialog(
             "Terminate process?",
             isPresented: terminationRequested,
@@ -44,30 +45,67 @@ struct ContentView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 12) {
-            TextField("Filter by port, process, PID or address", text: $viewModel.searchText)
-                .textFieldStyle(.roundedBorder)
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                TextField("Filter by port, process, PID or address", text: $viewModel.searchText)
+                    .textFieldStyle(.roundedBorder)
 
-            Picker("Source", selection: $viewModel.providerKind) {
-                ForEach(PortProviderKind.allCases) { kind in
-                    Text(kind.displayName).tag(kind)
+                Picker("Filter", selection: $viewModel.preset) {
+                    ForEach(PortFilterPreset.allCases) { preset in
+                        Text(preset.displayName).tag(preset)
+                    }
                 }
-            }
-            .pickerStyle(.menu)
-            .frame(width: 170)
-            .help("Where open ports are read from")
+                .pickerStyle(.menu)
+                .frame(width: 180)
+                .help("Narrow the list with a preset")
 
-            Toggle("Auto-refresh", isOn: $viewModel.isAutoRefreshEnabled)
-                .toggleStyle(.switch)
-
-            Button {
-                viewModel.refresh()
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Picker("Source", selection: $viewModel.providerKind) {
+                    ForEach(PortProviderKind.allCases) { kind in
+                        Text(kind.displayName).tag(kind)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(width: 170)
+                .help("Where open ports are read from")
             }
-            .disabled(viewModel.isRefreshing)
+
+            HStack(spacing: 12) {
+                Toggle("Group by process", isOn: $viewModel.groupByProcess)
+                    .toggleStyle(.checkbox)
+                    .help("Show one expandable row per process")
+
+                Toggle("Traffic rates", isOn: $viewModel.showsTrafficRates)
+                    .toggleStyle(.checkbox)
+                    .help("Sample per-process network throughput with nettop")
+
+                Toggle("Auto-refresh", isOn: $viewModel.isAutoRefreshEnabled)
+                    .toggleStyle(.switch)
+
+                Spacer()
+
+                exportMenu
+
+                Button {
+                    viewModel.refresh()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(viewModel.isRefreshing)
+            }
         }
         .padding(12)
+    }
+
+    private var exportMenu: some View {
+        Menu {
+            ForEach(PortExport.Format.allCases) { format in
+                Button("Export as \(format.displayName)…") { export(format) }
+            }
+        } label: {
+            Label("Export", systemImage: "square.and.arrow.up")
+        }
+        .fixedSize()
+        .help("Save the rows currently shown")
     }
 
     // MARK: - Content
@@ -78,6 +116,8 @@ struct ContentView: View {
             placeholder(systemImage: "exclamationmark.triangle", message: error)
         } else if viewModel.filteredPorts.isEmpty {
             placeholder(systemImage: "network.slash", message: "No open ports found")
+        } else if viewModel.groupByProcess {
+            groupedList
         } else {
             table
         }
@@ -120,6 +160,16 @@ struct ContentView: View {
                 Text(info.state ?? "—")
             }
             .width(min: 70, ideal: 90)
+
+            TableColumn("Rate") { info in
+                if viewModel.showsTrafficRates {
+                    Text(RateFormat.compact(viewModel.rate(for: info.pid)))
+                        .monospacedDigit()
+                        .foregroundStyle(viewModel.rate(for: info.pid) == nil ? .secondary : .primary)
+                        .help("Per-process throughput for \(info.processName)")
+                }
+            }
+            .width(min: 130, ideal: 170)
         }
         .contextMenu(forSelectionType: PortInfo.ID.self) { ids in
             if let port = port(for: ids.first) {
@@ -128,6 +178,66 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private var groupedList: some View {
+        List {
+            ForEach(viewModel.processGroups) { group in
+                DisclosureGroup {
+                    ForEach(group.ports) { info in
+                        socketRow(info, pid: group.pid)
+                    }
+                } label: {
+                    groupRow(group)
+                }
+                .contextMenu {
+                    Button("Terminate \(group.processName)…", role: .destructive) {
+                        pendingTermination = group.ports.first
+                    }
+                }
+            }
+        }
+        .listStyle(.inset)
+    }
+
+    private func groupRow(_ group: ProcessGroup) -> some View {
+        HStack(spacing: 8) {
+            Text(group.processName)
+                .fontWeight(.semibold)
+            Text("PID \(group.pid)")
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            Spacer()
+
+            Text("\(group.portCount) port\(group.portCount == 1 ? "" : "s")")
+                .foregroundStyle(.secondary)
+
+            if viewModel.showsTrafficRates {
+                Text(RateFormat.compact(viewModel.rate(for: group.pid)))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func socketRow(_ info: PortInfo, pid: Int) -> some View {
+        HStack(spacing: 8) {
+            Text("\(info.port)/\(info.transport.rawValue)")
+                .monospacedDigit()
+            Text(info.host)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(info.state ?? "—")
+                .foregroundStyle(.secondary)
+            if viewModel.newlyDiscovered.contains(info.id) {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 6, height: 6)
+                    .help("New since last refresh")
+            }
+        }
+        .padding(.leading, 4)
     }
 
     private func placeholder(systemImage: String, message: String) -> some View {
@@ -151,6 +261,11 @@ struct ContentView: View {
             Text("•")
             Text("\(viewModel.listenCount) listening")
                 .foregroundStyle(.secondary)
+            if viewModel.groupByProcess {
+                Text("•")
+                Text("\(viewModel.processGroups.count) processes")
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer()
 
@@ -197,5 +312,22 @@ struct ContentView: View {
             viewModel.reportActionError(error)
         }
         pendingTermination = nil
+    }
+
+    private func export(_ format: PortExport.Format) {
+        let panel = NSSavePanel()
+        panel.title = "Export ports"
+        panel.nameFieldStringValue = "ports.\(format.fileExtension)"
+        switch format {
+        case .csv: panel.allowedContentTypes = [.commaSeparatedText]
+        case .json: panel.allowedContentTypes = [.json]
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try viewModel.exportData(format: format).write(to: url)
+        } catch {
+            viewModel.reportActionError(error)
+        }
     }
 }

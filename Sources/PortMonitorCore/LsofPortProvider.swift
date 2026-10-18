@@ -32,7 +32,8 @@ public struct LsofPortProvider: PortProviding {
         if let runner {
             self.run = runner
         } else {
-            self.run = { args in try Self.runLsof(executablePath, args) }
+            // lsof returns 1 when nothing matched; that is not an error for us.
+            self.run = { args in try Subprocess.run(executablePath, args, allowingStatus: [0, 1]) }
         }
     }
 
@@ -51,35 +52,5 @@ public struct LsofPortProvider: PortProviding {
             if lhs.port != rhs.port { return lhs.port < rhs.port }
             return lhs.transport.rawValue < rhs.transport.rawValue
         }
-    }
-
-    private static func runLsof(_ path: String, _ args: [String]) throws -> String {
-        guard FileManager.default.isExecutableFile(atPath: path) else {
-            throw PortProviderError.toolNotFound(path)
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = args
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        try process.run()
-
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-
-        // lsof returns 1 when nothing matches; that is not an error for us.
-        if process.terminationStatus != 0 && process.terminationStatus != 1 {
-            let message = String(decoding: errData, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            throw PortProviderError.failed(status: process.terminationStatus, message: message)
-        }
-
-        return String(decoding: outData, as: UTF8.self)
     }
 }

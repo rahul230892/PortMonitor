@@ -13,12 +13,18 @@ struct PortTerminationError: LocalizedError {
     }
 }
 
-/// Drives the port list UI: fetching, filtering, auto-refresh, change detection
-/// and terminating the owner of a port.
+/// Drives the port list UI: fetching, filtering, auto-refresh, change detection,
+/// per-process traffic rates, export and terminating the owner of a port.
+///
+/// All the interesting decision logic lives in `PortMonitorCore`
+/// (`PortFilter`, `PortListDiffer`, `ProcessGrouping`, `TrafficRateCalculator`,
+/// `PortExport`); this type is the thin, UI-facing shell around it.
 @MainActor
 final class PortListViewModel: ObservableObject {
     @Published private(set) var ports: [PortInfo] = []
     @Published var searchText: String = ""
+    @Published var preset: PortFilterPreset = .all
+    @Published var groupByProcess: Bool = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var actionError: String?
     @Published private(set) var lastUpdated: Date?
@@ -27,20 +33,19 @@ final class PortListViewModel: ObservableObject {
     /// Sockets that appeared since the previous refresh, for highlighting.
     @Published private(set) var newlyDiscovered: Set<String> = []
 
-    var providerKind: PortProviderKind {
-        didSet {
-            guard providerKind != oldValue else { return }
-            provider = providerKind.makeProvider()
-            knownIDs = []
-            hasLoadedOnce = false
-            refresh()
-        }
-    }
+    /// Per-process throughput, keyed by PID.
+    @Published private(set) var traffic: [Int: TrafficRate] = [:]
 
-    var isAutoRefreshEnabled: Bool {
+    /// When off, no `nettop` sampling happens and the rate column shows `—`.
+    var showsTrafficRates: Bool = true {
         didSet {
-            guard isAutoRefreshEnabled != oldValue else { return }
-            if isAutoRefreshEnabled { startAutoRefresh() } else { stopAutoRefresh() }
+            guard showsTrafficRates != oldValue else { return }
+            if showsTrafficRates {
+                refreshTraffic()
+            } else {
+                traffic = [:]
+                lastTrafficSample = nil
+            }
         }
     }
 
@@ -54,15 +59,40 @@ final class PortListViewModel: ObservableObject {
         }
     }
 
+    var providerKind: PortProviderKind {
+        didSet {
+            guard providerKind != oldValue else { return }
+            provider = providerKind.makeProvider()
+            differ.reset()
+            lastTrafficSample = nil
+            traffic = [:]
+            refresh()
+        }
+    }
+
+    var isAutoRefreshEnabled: Bool {
+        didSet {
+            guard isAutoRefreshEnabled != oldValue else { return }
+            if isAutoRefreshEnabled { startAutoRefresh() } else { stopAutoRefresh() }
+        }
+    }
+
     private var provider: PortProviding
-    private var knownIDs: Set<String> = []
-    private var hasLoadedOnce = false
+    private var differ = PortListDiffer()
+    private var trafficSampler: TrafficSampling
+    private var lastTrafficSample: (date: Date, traffic: [ProcessTraffic])?
+    private var isSamplingTraffic = false
     private var autoRefreshTask: Task<Void, Never>?
 
-    init(providerKind: PortProviderKind = .automatic, autoRefresh: Bool = true) {
+    init(
+        providerKind: PortProviderKind = .automatic,
+        autoRefresh: Bool = true,
+        traffic: TrafficSampling = NettopTrafficProvider()
+    ) {
         self.providerKind = providerKind
         self.isAutoRefreshEnabled = autoRefresh
         self.provider = providerKind.makeProvider()
+        self.trafficSampler = traffic
         if autoRefresh {
             startAutoRefresh()
         }
@@ -74,19 +104,19 @@ final class PortListViewModel: ObservableObject {
 
     // MARK: - Derived state
 
+    /// The ports currently shown, after the search text and preset are applied.
     var filteredPorts: [PortInfo] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return ports }
-        return ports.filter { info in
-            info.processName.lowercased().contains(query)
-                || String(info.port).contains(query)
-                || String(info.pid).contains(query)
-                || info.host.lowercased().contains(query)
-                || info.transport.rawValue.lowercased().contains(query)
-        }
+        PortFilter.apply(ports, query: searchText, preset: preset)
+    }
+
+    /// The filtered ports folded into one row per process.
+    var processGroups: [ProcessGroup] {
+        ProcessGrouping.groups(from: filteredPorts)
     }
 
     var listenCount: Int { ports.filter(\.isListening).count }
+
+    func rate(for pid: Int) -> TrafficRate? { traffic[pid] }
 
     // MARK: - Refresh
 
@@ -109,22 +139,60 @@ final class PortListViewModel: ObservableObject {
     }
 
     private func apply(_ items: [PortInfo]) {
-        let ids = Set(items.map(\.id))
-        if hasLoadedOnce {
-            newlyDiscovered = ids.subtracting(knownIDs)
-            if notifyOnNewPorts, !newlyDiscovered.isEmpty {
-                PortNotifier.shared.notify(added: items.filter { newlyDiscovered.contains($0.id) })
-            }
-        } else {
-            newlyDiscovered = []
-            hasLoadedOnce = true
+        let update = differ.apply(items)
+
+        newlyDiscovered = update.addedIDs
+        if notifyOnNewPorts, !update.isInitialLoad, !update.added.isEmpty {
+            PortNotifier.shared.notify(added: update.added)
         }
-        knownIDs = ids
+
         ports = items
         errorMessage = nil
         lastUpdated = Date()
         isRefreshing = false
+
+        refreshTraffic()
     }
+
+    // MARK: - Traffic
+
+    /// Samples per-process counters and turns the delta into rates.
+    private func refreshTraffic() {
+        guard showsTrafficRates, !isSamplingTraffic else { return }
+        isSamplingTraffic = true
+        let sampler = trafficSampler
+        let sampledAt = Date()
+
+        Task { [weak self] in
+            let current = (try? await Task.detached(priority: .utility) {
+                try sampler.sample()
+            }.value) ?? []
+
+            guard let self else { return }
+            self.isSamplingTraffic = false
+            self.applyTraffic(current, at: sampledAt)
+        }
+    }
+
+    private func applyTraffic(_ current: [ProcessTraffic], at date: Date) {
+        defer { lastTrafficSample = (date, current) }
+
+        guard let previous = lastTrafficSample else { return }
+        traffic = TrafficRateCalculator.rates(
+            previous: previous.traffic,
+            current: current,
+            interval: date.timeIntervalSince(previous.date)
+        )
+    }
+
+    // MARK: - Export
+
+    /// Serialises the rows currently on screen.
+    func exportData(format: PortExport.Format) throws -> Data {
+        try PortExport.data(filteredPorts, format: format)
+    }
+
+    // MARK: - Auto refresh
 
     func startAutoRefresh(interval: TimeInterval = 3) {
         autoRefreshTask?.cancel()

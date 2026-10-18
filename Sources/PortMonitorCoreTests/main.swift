@@ -20,7 +20,42 @@ let tests: [(name: String, run: () throws -> Void)] = [
     ("native provider returns sorted in-range ports", testNativeProviderReturnsSortedInRangePorts),
     ("native and lsof agree on TCP listeners", testNativeAndLsofAgreeOnTcpListeners),
     ("provider kind builds expected providers", testProviderKindBuildsExpectedProviders),
-    ("identifier is stable and distinguishes sockets", testIdentifierIsStableAndDistinguishesSockets)
+    ("identifier is stable and distinguishes sockets", testIdentifierIsStableAndDistinguishesSockets),
+
+    // Filter presets
+    ("preset 'all' keeps everything", testPresetAllKeepsEverything),
+    ("presets narrow by protocol and port band", testPresetsNarrowByProtocolAndPortBand),
+    ("listening preset drops non-listeners", testListeningPresetDropsNonListeners),
+    ("query matches name, port, pid, host, proto and state", testQueryMatchesNamePortPidHostProtoAndState),
+    ("query and preset compose", testQueryAndPresetCompose),
+
+    // Refresh differ
+    ("first sample is the initial load and highlights nothing", testFirstSampleIsInitialLoadAndHighlightsNothing),
+    ("differ reports added and removed sockets", testDifferReportsAddedAndRemovedSockets),
+    ("differ is stable when nothing changes", testDifferIsStableWhenNothingChanges),
+    ("differ reset restores first-load behaviour", testDifferResetMakesNextSampleTheInitialLoadAgain),
+
+    // Per-process grouping
+    ("groups sockets by owning process", testGroupsSocketsByOwningProcess),
+    ("grouping keeps same-named processes with different pids apart", testGroupingKeepsSameNameWithDifferentPidsApart),
+
+    // Traffic rates
+    ("rates are computed from byte deltas", testRatesAreComputedFromByteDeltas),
+    ("rates skip unknown pids and zero traffic", testRatesSkipUnknownPIDsAndZeroTraffic),
+    ("rates clamp counter resets to zero", testRatesClampCounterResetsToZero),
+    ("rates require a positive interval", testRatesRequirePositiveInterval),
+    ("rate formatting", testRateFormatting),
+
+    // nettop
+    ("parses nettop CSV", testParsesNettopCSV),
+    ("nettop provider uses its runner", testNettopProviderUsesItsRunner),
+    ("nettop provider reports a missing tool", testNettopProviderReportsMissingTool),
+    ("real nettop runs on this host", testRealNettopRunsOnThisHost),
+
+    // Export
+    ("CSV has a header and escapes fields", testCSVHasHeaderAndEscapesFields),
+    ("CSV escapes embedded quotes", testCSVEscapesEmbeddedQuotes),
+    ("JSON export round-trips", testJSONExportRoundTrips)
 ]
 
 var passed = 0
