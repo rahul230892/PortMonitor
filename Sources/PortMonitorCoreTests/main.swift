@@ -59,6 +59,7 @@ let tests: [(name: String, run: () throws -> Void)] = [
 ]
 
 var passed = 0
+var skipped: [String] = []
 var failed: [String] = []
 
 for test in tests {
@@ -66,13 +67,19 @@ for test in tests {
         try test.run()
         passed += 1
         print("  ok  \(test.name)")
+    } catch let skip as TestSkipped {
+        skipped.append(test.name)
+        print("skip  \(test.name) — \(skip.description)")
     } catch {
         failed.append(test.name)
         print("fail  \(test.name)\n        \(error)")
     }
 }
 
-print("\n\(passed)/\(tests.count) passed")
+let summary = skipped.isEmpty
+    ? "\n\(passed)/\(tests.count) passed"
+    : "\n\(passed)/\(tests.count) passed, \(skipped.count) skipped"
+print(summary)
 if !failed.isEmpty {
     print("failed: \(failed.joined(separator: ", "))")
     exit(1)

@@ -19,6 +19,29 @@ struct TestFailure: Error, CustomStringConvertible {
     let description: String
 }
 
+/// Raised when a test cannot run meaningfully on the current host.
+///
+/// Used by the integration tests that compare real backends: on a machine (or a
+/// CI runner) where a backend legitimately sees no sockets, there is nothing to
+/// compare and the test should be reported as skipped rather than failed.
+struct TestSkipped: Error, CustomStringConvertible {
+    let description: String
+
+    init(_ description: String) {
+        self.description = description
+    }
+}
+
+/// Skips the current test when `condition` is true.
+func skipIf(
+    _ condition: Bool,
+    _ reason: @autoclosure () -> String = "not applicable on this host"
+) throws {
+    if condition {
+        throw TestSkipped(reason())
+    }
+}
+
 private func location(_ file: StaticString, _ line: UInt) -> String {
     "\(URL(fileURLWithPath: file.description).lastPathComponent):\(line)"
 }

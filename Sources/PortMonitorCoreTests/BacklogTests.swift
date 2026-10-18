@@ -268,6 +268,7 @@ func testNettopProviderReportsMissingTool() throws {
 func testRealNettopRunsOnThisHost() throws {
     // nettop should at least run and return parseable rows on a normal Mac.
     let traffic = try NettopTrafficProvider().sample()
+    try skipIf(traffic.isEmpty, "nettop reported no per-process rows on this host")
     try expect(traffic.allSatisfy { $0.pid > 0 }, "every row has a pid")
 }
 
