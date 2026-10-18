@@ -1,3 +1,17 @@
+# Build artifacts
+.build/
+build/
+*.app
+*.zip
+
+# Legacy compiled binary kept for reference
+testapp
+
+# Xcode / SwiftPM
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# macOS
 .DS_Store
-PortMonitor.zip
-PortMonitor.app
